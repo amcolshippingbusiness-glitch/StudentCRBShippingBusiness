@@ -388,18 +388,19 @@
     }
 
     async function initDataSDK() {
+  // 1) helper: list
   async function apiList() {
-    const res = await fetch(`${API_URL}?action=list&key=${encodeURIComponent(API_KEY)}`, {
-      method: "GET",
-      cache: "no-store"
-    });
+    const res = await fetch(
+      `${API_URL}?action=list&key=${encodeURIComponent(API_KEY)}`,
+      { method: "GET", cache: "no-store" }
+    );
     return res.json();
   }
 
+  // 2) helper: post (หลบ CORS preflight ด้วย text/plain)
   async function apiPost(action, record) {
     const res = await fetch(API_URL, {
       method: "POST",
-      // ✅ สำคัญ: ใช้ text/plain เพื่อเลี่ยง preflight/CORS กับ Apps Script
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ key: API_KEY, action, record }),
       cache: "no-store"
@@ -407,6 +408,7 @@
     return res.json();
   }
 
+  // 3) SDK interface
   window.dataSdk = {
     async init(handler) {
       try {
@@ -462,7 +464,6 @@
   if (!result.isOk) console.error("Failed to initialize data SDK");
   return result.isOk;
 }
-
     function generateId(prefix) {
       return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
