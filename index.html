@@ -388,90 +388,80 @@
     }
 
     async function initDataSDK() {
-      async function apiList() {
-        const res = await fetch(`${API_URL}?action=list&key=${encodeURIComponent(API_KEY)}`, {
-          method: "GET",
-          cache: "no-store"
-        });
-        return res.json();
-      }
+  async function apiList() {
+    const res = await fetch(`${API_URL}?action=list&key=${encodeURIComponent(API_KEY)}`, {
+      method: "GET",
+      cache: "no-store"
+    });
+    return res.json();
+  }
 
-      async function apiPost(action, record) {
-        const res = await fetch(API_URL, {
-          method: "POST",
-          async function apiPost(action, record) {
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" }, // ✅ กัน preflight OPTIONS
-    body: JSON.stringify({ key: API_KEY, action, record }),
-    cache: "no-store"
-  });
-  return res.json();
-}
+  async function apiPost(action, record) {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      // ✅ สำคัญ: ใช้ text/plain เพื่อเลี่ยง preflight/CORS กับ Apps Script
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ key: API_KEY, action, record }),
+      cache: "no-store"
+    });
+    return res.json();
+  }
 
-          body: JSON.stringify({ key: API_KEY, action, record })
-        });
-        return res.json();
-      }
-
-      window.dataSdk = {
-        async init(handler) {
-          try {
-            const json = await apiList();
-            if (json.ok) {
-              allRecords = json.data || [];
-              handler?.onDataChanged?.(allRecords);
-              return { isOk: true };
-            }
-            console.error("API init error:", json);
-            return { isOk: false };
-          } catch (err) {
-            console.error(err);
-            return { isOk: false };
-          }
-        },
-
-        async create(record) {
-          try {
-            const json = await apiPost("create", record);
-            if (!json.ok) {
-              console.error("API create error:", json);
-              return { isOk: false };
-            }
-            const listJson = await apiList();
-            allRecords = listJson.data || [];
-            return { isOk: true };
-          } catch (err) {
-            console.error(err);
-            return { isOk: false };
-          }
-        },
-
-        async update(record) {
-          try {
-            const json = await apiPost("update", record);
-            if (!json.ok) {
-              console.error("API update error:", json);
-              return { isOk: false };
-            }
-            const listJson = await apiList();
-            allRecords = listJson.data || [];
-            return { isOk: true };
-          } catch (err) {
-            console.error(err);
-            return { isOk: false };
-          }
+  window.dataSdk = {
+    async init(handler) {
+      try {
+        const json = await apiList();
+        if (json.ok) {
+          allRecords = json.data || [];
+          handler?.onDataChanged?.(allRecords);
+          return { isOk: true };
         }
-      };
+        console.error("API init error:", json);
+        return { isOk: false };
+      } catch (err) {
+        console.error(err);
+        return { isOk: false };
+      }
+    },
 
-      const dataHandler = {
-        onDataChanged(data) { allRecords = data; }
-      };
+    async create(record) {
+      try {
+        const json = await apiPost("create", record);
+        if (!json.ok) {
+          console.error("API create error:", json);
+          return { isOk: false };
+        }
+        const listJson = await apiList();
+        allRecords = listJson.data || [];
+        return { isOk: true };
+      } catch (err) {
+        console.error(err);
+        return { isOk: false };
+      }
+    },
 
-      const result = await window.dataSdk.init(dataHandler);
-      if (!result.isOk) console.error("Failed to initialize data SDK");
-      return result.isOk;
+    async update(record) {
+      try {
+        const json = await apiPost("update", record);
+        if (!json.ok) {
+          console.error("API update error:", json);
+          return { isOk: false };
+        }
+        const listJson = await apiList();
+        allRecords = listJson.data || [];
+        return { isOk: true };
+      } catch (err) {
+        console.error(err);
+        return { isOk: false };
+      }
     }
+  };
+
+  const dataHandler = { onDataChanged(data) { allRecords = data; } };
+  const result = await window.dataSdk.init(dataHandler);
+  if (!result.isOk) console.error("Failed to initialize data SDK");
+  return result.isOk;
+}
 
     function generateId(prefix) {
       return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
