@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="th" class="h-full">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ระบบสอบ Shipping Business ออนไลน์</title>
@@ -398,7 +399,16 @@
       async function apiPost(action, record) {
         const res = await fetch(API_URL, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          async function apiPost(action, record) {
+  const res = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // ✅ กัน preflight OPTIONS
+    body: JSON.stringify({ key: API_KEY, action, record }),
+    cache: "no-store"
+  });
+  return res.json();
+}
+
           body: JSON.stringify({ key: API_KEY, action, record })
         });
         return res.json();
