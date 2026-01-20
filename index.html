@@ -418,7 +418,7 @@
           handler?.onDataChanged?.(allRecords);
           return { isOk: true };
         }
-        console.error("API init error:", json);
+        console.error("API init error:", JSON.stringify(json));
         return { isOk: false };
       } catch (err) {
         console.error(err);
@@ -430,7 +430,7 @@
       try {
         const json = await apiPost("create", record);
         if (!json.ok) {
-          console.error("API create error:", json);
+          console.error("API create error:", JSON.stringify(json));
           return { isOk: false };
         }
         const listJson = await apiList();
