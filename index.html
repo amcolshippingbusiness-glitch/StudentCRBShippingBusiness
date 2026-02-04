@@ -8,10 +8,10 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
 
-  <!-- Google Font (ย้ายจาก @import ให้ถูกต้อง) -->
+  <!-- Google Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -40,6 +40,9 @@
   <div id="app" class="w-full h-full overflow-auto"></div>
 
   <script>
+    // ===============================
+    // CONFIG / DATA
+    // ===============================
     const defaultConfig = {
       site_title: "SHIPPING BUSINESS",
       site_description: "ธุรกิจการขนส่งทางทะเล",
@@ -78,7 +81,7 @@
           { id: "c2_s3", name: "การจัดการโลจิสติกส์ในประเทศไทย" },
           { id: "c2_s4", name: "โครงสร้างพื้นฐานด้านโลจิสติกส์ในประเทศไทย" },
           { id: "c2_s5", name: "ความท้าทายในการจัดการโลจิสติกส์และโครงสร้างพื้นฐาน" },
-          { id: "c2_s6", name: "แนวโน้มในอนาคตของการจัดการโลจิสติกส์และโครงส���้างพื้นฐาน" },
+          { id: "c2_s6", name: "แนวโน้มในอนาคตของการจัดการโลจิสติกส์และโครงสร้างพื้นฐาน" },
           { id: "c2_s7", name: "บทบาทของโครงสร้างพื้นฐานในอุตสาหกรรมการขนส่ง" },
           { id: "c2_s8", name: "ท่าเรือหลักในระดับโลก" },
           { id: "c2_s9", name: "คลังสินค้าและเทคโนโลยีที่เกี่ยวข้อง" },
@@ -159,7 +162,7 @@
       {
         id: "chapter7",
         number: "7",
-        name: "การ��ระกันภัยทางทะเล",
+        name: "การประกันภัยทางทะเล",
         description: "Marine Insurance",
         subtopics: [
           { id: "c7_s1", name: "ความหมายของการประกันภัยทางทะเล" },
@@ -269,7 +272,7 @@
           { id: "c12_s7", name: "กรณีศึกษา การรั่วไหลของน้ำมันจากเรือ Exxon Valdez (1989)" },
           { id: "c12_s8", name: "การจัดการวิกฤตและฟื้นฟู" },
           { id: "c12_s9", name: "การจัดทำแผนบริหารความเสี่ยงในอุตสาหกรรมการขนส่งทางทะเล" },
-          { id: "c12_s10", name: "การสื่อสารในสถานการณ์วิกฤตในอุตสาหกรรมการขนส่ง���างทะเล" },
+          { id: "c12_s10", name: "การสื่อสารในสถานการณ์วิกฤตในอุตสาหกรรมการขนส่งทางทะเล" },
           { id: "c12_s11", name: "การฟื้นฟูกิจการและความน่าเชื่อถือในอุตสาหกรรมการขนส่งทางทะเล" }
         ]
       },
@@ -365,6 +368,9 @@
       }
     ];
 
+    // ===============================
+    // STATE
+    // ===============================
     let currentView = 'landing';
     let currentUser = null;
     let selectedChapter = null;
@@ -372,10 +378,15 @@
     let bookingData = null;
     let allRecords = [];
     let isAdminMode = false;
+    let signatureData = ""; // ✅ ต้องประกาศ (ของเดิมขาด ทำให้บางบราวเซอร์พัง)
 
     const ADMIN_CODE = 'ChayanonOrorum!!!';
-// ===== Firebase Config (ใส่ค่าจริงจาก Firebase Console) =====
-const firebaseConfig = {
+
+    // ===============================
+    // FIREBASE (Firestore only)
+    // ===============================
+    // ✅ ใส่ค่าจริงจาก Firebase Console (ของคุณใส่มาแล้ว ใช้ได้)
+    const firebaseConfig = {
   apiKey: "AIzaSyBYdF1hUl5m5h2BROtiyWpsKu7Y2ZBAeLQ",
   authDomain: "databaseshippingstudent.firebaseapp.com",
   projectId: "databaseshippingstudent",
@@ -385,152 +396,122 @@ const firebaseConfig = {
   measurementId: "G-Z0BDLXNR0R"
 };
 
-// init firebase (กัน init ซ้ำ)
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
+    // ✅ ฐานข้อมูลใหม่: เปลี่ยน collection ชื่อใหม่ได้เลย
+    const RECORDS_COLLECTION = "records_v2";
 
-const db = firebase.firestore();
-
-// ===== Firestore Data SDK (คงหน้าตาเดิม เพื่อไม่ให้ส่วนอื่นพัง) =====
-async function initDataSDK() {
-  const col = db.collection("records");
-
-  function mapDocsToRecords(snapshot) {
-    return snapshot.docs.map(d => ({
-      __backendId: d.id,     // ใช้ docId แทน __backendId เดิม
-      ...d.data()
-    }));
-  }
-
-  window.dataSdk = {
-    _unsub: null,
-
-    async init(handler) {
-      try {
-        // โหลดครั้งแรก
-        const snap = await col.get();
-        allRecords = mapDocsToRecords(snap);
-        handler?.onDataChanged?.(allRecords);
-
-        // realtime (อยากให้เหมือนเดิมแบบ data เปลี่ยนแล้ว UI เห็นทันที)
-        this._unsub?.();
-        this._unsub = col.onSnapshot((qSnap) => {
-          allRecords = mapDocsToRecords(qSnap);
-          handler?.onDataChanged?.(allRecords);
-        });
-
-        return { isOk: true };
-      } catch (err) {
-        console.error("Firestore init error:", err);
-        return { isOk: false };
-      }
-    },
-
-    async create(record) {
-      try {
-        // ห้ามส่ง __backendId เข้าไปเก็บ (Firestore มีข้อจำกัดชื่อ field แบบ __...__)
-        const data = { ...record };
-        delete data.__backendId;
-
-        // เพิ่มเอกสารใหม่
-        const docRef = await col.add(data);
-
-        // อัปเดต local cache ให้เร็ว
-        allRecords = [{ __backendId: docRef.id, ...data }, ...allRecords];
-
-        return { isOk: true };
-      } catch (err) {
-        console.error("Firestore create error:", err);
-        return { isOk: false };
-      }
-    },
-
-    async update(record) {
-      try {
-        if (!record.__backendId) return { isOk: false };
-
-        const id = record.__backendId;
-        const data = { ...record };
-        delete data.__backendId;
-
-        // merge = อัปเดตเฉพาะ field ที่ส่งมา (ลดโอกาสพัง)
-        await col.doc(id).set(data, { merge: true });
-
-        return { isOk: true };
-      } catch (err) {
-        console.error("Firestore update error:", err);
-        return { isOk: false };
-      }
+    // init firebase (กัน init ซ้ำ)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
     }
-  };
+    const db = firebase.firestore();
 
-  const dataHandler = { onDataChanged(data) { allRecords = data; } };
-  const result = await window.dataSdk.init(dataHandler);
+    // ===== Firestore Data SDK (คงหน้าตาเดิม เพื่อไม่ให้ส่วนอื่นพัง) =====
+    async function initDataSDK() {
+      const col = db.collection(RECORDS_COLLECTION);
 
-  if (!result.isOk) console.error("Failed to initialize Firestore data SDK");
-  return result.isOk;
-}
-
-
-  // 3) SDK interface
-  window.dataSdk = {
-    async init(handler) {
-      try {
-        const json = await apiList();
-        if (json.ok) {
-          allRecords = json.data || [];
-          handler?.onDataChanged?.(allRecords);
-          return { isOk: true };
-        }
-        console.error("API init error:", JSON.stringify(json));
-        return { isOk: false };
-      } catch (err) {
-        console.error(err);
-        return { isOk: false };
+      function mapDocs(snapshot) {
+        return snapshot.docs.map(d => ({
+          __backendId: d.id,
+          ...d.data()
+        }));
       }
-    },
 
-    async create(record) {
-      try {
-        const json = await apiPost("create", record);
-        if (!json.ok) {
-          console.error("API create error:", JSON.stringify(json));
-          return { isOk: false };
-        }
-        const listJson = await apiList();
-        allRecords = listJson.data || [];
-        return { isOk: true };
-      } catch (err) {
-        console.error(err);
-        return { isOk: false };
-      }
-    },
+      window.dataSdk = {
+        _unsub: null,
+        _ready: false,
 
-    async update(record) {
-      try {
-        const json = await apiPost("update", record);
-        if (!json.ok) {
-          console.error("API update error:", json);
-          return { isOk: false };
+        async init(handler) {
+          try {
+            // รอ snapshot แรกก่อน เพื่อกัน allRecords ว่างแล้วระบบสมัครซ้ำ/เช็คผู้ใช้พัง
+            const firstLoad = new Promise((resolve) => {
+              let done = false;
+
+              this._unsub?.();
+              this._unsub = col.onSnapshot(
+                (qSnap) => {
+                  allRecords = mapDocs(qSnap);
+                  handler?.onDataChanged?.(allRecords);
+
+                  if (!done) {
+                    done = true;
+                    resolve({ isOk: true });
+                  }
+                },
+                (err) => {
+                  console.error("Firestore onSnapshot error:", err);
+                  if (!done) {
+                    done = true;
+                    resolve({ isOk: false });
+                  }
+                }
+              );
+            });
+
+            return await firstLoad;
+          } catch (err) {
+            console.error("Firestore init error:", err);
+            return { isOk: false };
+          }
+        },
+
+        async create(record) {
+          try {
+            const data = { ...record };
+            delete data.__backendId;
+            await col.add(data);
+            return { isOk: true };
+          } catch (err) {
+            console.error("Firestore create error:", err);
+            return { isOk: false };
+          }
+        },
+
+        async update(record) {
+          try {
+            if (!record.__backendId) return { isOk: false };
+
+            const id = record.__backendId;
+            const data = { ...record };
+            delete data.__backendId;
+
+            await col.doc(id).set(data, { merge: true });
+            return { isOk: true };
+          } catch (err) {
+            console.error("Firestore update error:", err);
+            return { isOk: false };
+          }
+        },
+
+        async delete(id) {
+          try {
+            if (!id) return { isOk: false };
+            await col.doc(id).delete();
+            return { isOk: true };
+          } catch (err) {
+            console.error("Firestore delete error:", err);
+            return { isOk: false };
+          }
         }
-        const listJson = await apiList();
-        allRecords = listJson.data || [];
-        return { isOk: true };
-      } catch (err) {
-        console.error(err);
-        return { isOk: false };
-      }
+      };
+
+      const dataHandler = { onDataChanged(data) { allRecords = data; } };
+      const result = await window.dataSdk.init(dataHandler);
+      if (!result.isOk) console.error("Failed to initialize Firestore data SDK");
+      return result.isOk;
     }
-  };
 
-  const dataHandler = { onDataChanged(data) { allRecords = data; } };
-  const result = await window.dataSdk.init(dataHandler);
-  if (!result.isOk) console.error("Failed to initialize data SDK");
-  return result.isOk;
-}
+    // ===============================
+    // HELPERS
+    // ===============================
     function generateId(prefix) {
       return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    async function simpleHash(text) {
+      // ✅ ใช้ SHA-256 (Web Crypto) ให้แน่นอนและไม่พัง
+      const enc = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(text)));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     function getUserRecords() {
@@ -557,17 +538,8 @@ async function initDataSDK() {
     }
 
     function renderProgressBar(percentage, size = 'large') {
-      const sizeClasses = {
-        small: 'h-2',
-        medium: 'h-4',
-        large: 'h-6'
-      };
-
-      const textSizeClasses = {
-        small: 'text-xs',
-        medium: 'text-sm',
-        large: 'text-base'
-      };
+      const sizeClasses = { small: 'h-2', medium: 'h-4', large: 'h-6' };
+      const textSizeClasses = { small: 'text-xs', medium: 'text-sm', large: 'text-base' };
 
       return `
         <div class="mb-4">
@@ -677,6 +649,9 @@ async function initDataSDK() {
       setTimeout(() => messageDiv.remove(), 5000);
     }
 
+    // ===============================
+    // ADMIN UI
+    // ===============================
     function renderAdminButton() {
       if (!currentUser) return '';
 
@@ -970,6 +945,9 @@ async function initDataSDK() {
       });
     }
 
+    // ===============================
+    // LANDING
+    // ===============================
     function renderLanding() {
       currentView = 'landing';
       const config = window.elementSdk?.config || defaultConfig;
@@ -1002,6 +980,9 @@ async function initDataSDK() {
       document.getElementById('register-btn').addEventListener('click', renderRegister);
     }
 
+    // ===============================
+    // SIGNATURE PAD
+    // ===============================
     function setupSignaturePad() {
       const canvas = document.getElementById("signature-canvas");
       const clearBtn = document.getElementById("clear-signature");
@@ -1009,7 +990,6 @@ async function initDataSDK() {
 
       const ctx = canvas.getContext("2d");
 
-      // ทำให้ canvas width ตรงกับ CSS (แก้ปัญหาเส้นเพี้ยน/ตำแหน่งเพี้ยน)
       canvas.width = canvas.offsetWidth || 600;
       canvas.height = 200;
 
@@ -1049,12 +1029,10 @@ async function initDataSDK() {
         }
       }
 
-      // mouse
       canvas.addEventListener("mousedown", start);
       canvas.addEventListener("mousemove", move);
       window.addEventListener("mouseup", end);
 
-      // touch
       canvas.addEventListener("touchstart", start, { passive: false });
       canvas.addEventListener("touchmove", move, { passive: false });
       canvas.addEventListener("touchend", end);
@@ -1068,6 +1046,9 @@ async function initDataSDK() {
       }
     }
 
+    // ===============================
+    // REGISTER
+    // ===============================
     function renderRegister() {
       currentView = 'register';
 
@@ -1172,6 +1153,9 @@ async function initDataSDK() {
       });
     }
 
+    // ===============================
+    // LOGIN
+    // ===============================
     function renderLogin() {
       currentView = 'login';
 
@@ -1243,6 +1227,9 @@ async function initDataSDK() {
       });
     }
 
+    // ===============================
+    // DASHBOARD
+    // ===============================
     function renderDashboard() {
       currentView = 'dashboard';
 
@@ -1361,12 +1348,15 @@ async function initDataSDK() {
           const booking = allRecords.find(r => r.__backendId === bookingId);
           if (booking) {
             bookingData = booking;
-            renderExamDetail(); // ให้ renderExamDetail() จัดการ signature เอง (กันเรียกซ้ำ)
+            renderExamDetail();
           }
         });
       });
     }
 
+    // ===============================
+    // CHAPTER SELECTION
+    // ===============================
     function renderChapterSelection() {
       const config = window.elementSdk?.config || defaultConfig;
       const userBookings = getUserRecords();
@@ -1423,6 +1413,9 @@ async function initDataSDK() {
       setupAdminButton();
     }
 
+    // ===============================
+    // SUBTOPIC SELECTION
+    // ===============================
     function renderSubtopicSelection() {
       const userBookings = getUserRecords();
       const progressData = calculateUserProgress(userBookings);
@@ -1484,6 +1477,9 @@ async function initDataSDK() {
       setupAdminButton();
     }
 
+    // ===============================
+    // BOOKING FORM
+    // ===============================
     function renderBookingForm() {
       const app = document.getElementById('app');
       app.innerHTML = `
@@ -1572,11 +1568,13 @@ async function initDataSDK() {
       });
     }
 
+    // ===============================
+    // EXAM DETAIL
+    // ===============================
     function renderExamDetail() {
       const currentRecord = allRecords.find(r => r.__backendId === bookingData.__backendId);
       if (currentRecord) bookingData = currentRecord;
 
-      // reset เฉพาะค่าที่ user วาดใหม่ (แต่จะไม่ลบทับของเดิมใน sheet ถ้าไม่วาด)
       signatureData = "";
 
       const app = document.getElementById('app');
@@ -1688,7 +1686,6 @@ async function initDataSDK() {
         const updatedRecordFromSheet = allRecords.find(r => r.__backendId === bookingData.__backendId);
         const baseRecord = updatedRecordFromSheet || bookingData;
 
-        // ✅ สำคัญ: ถ้าไม่ได้วาดใหม่ ให้คงลายเซ็นเดิม (ไม่ลบทิ้ง)
         const signedValue = signatureData ? signatureData : (baseRecord.signed || '');
 
         const recordToUpdate = {
@@ -1723,6 +1720,9 @@ async function initDataSDK() {
       });
     }
 
+    // ===============================
+    // ELEMENT SDK CONFIG HANDLER
+    // ===============================
     async function onConfigChange(config) {
       if (currentView === 'landing') {
         const titleElement = document.querySelector('h1');
@@ -1732,12 +1732,10 @@ async function initDataSDK() {
       }
     }
 
+    // ===============================
+    // INIT
+    // ===============================
     async function init() {
-      const apiUrl = String(window.API_URL || "");
-if (!apiUrl || !apiUrl.includes("script.google.com")) {
-  console.warn("API_URL ยังไม่ถูกตั้งค่า (หรือไม่ใช่ Apps Script URL)");
-}
-
       await initDataSDK();
 
       if (window.elementSdk) {
