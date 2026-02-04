@@ -7,6 +7,9 @@
   <title>ระบบสอบ Shipping Business ออนไลน์</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
 
   <!-- Google Font (ย้ายจาก @import ให้ถูกต้อง) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -371,42 +374,104 @@
     let isAdminMode = false;
 
     const ADMIN_CODE = 'ChayanonOrorum!!!';
+// ===== Firebase Config (ใส่ค่าจริงจาก Firebase Console) =====
+const firebaseConfig = {
+  apiKey: "AIzaSyBYdF1hUl5m5h2BROtiyWpsKu7Y2ZBAeLQ",
+  authDomain: "databaseshippingstudent.firebaseapp.com",
+  projectId: "databaseshippingstudent",
+  storageBucket: "databaseshippingstudent.firebasestorage.app",
+  messagingSenderId: "935239585493",
+  appId: "1:935239585493:web:abb05bb3814be08bb05c5c",
+  measurementId: "G-Z0BDLXNR0R"
+};
 
-    // ===== Google Sheet API (Apps Script Web App) =====
-    const API_URL = "https://script.google.com/macros/s/AKfycbzJJnYCqTU7hKqigCdB879fhaPvA1iRielMPJNS9FbyYZ7z0UlRV6uqJ-YvKn3lM1uCcA/exec"; // ใส่ URL /exec ของคุณ
-    const API_KEY = "HB-EXAM-2026-9fK3mQ8vZ2pL7xR1aT6nW0yU4eI5oS";                 // ใส่ key เดียวกับใน Apps Script
+// init firebase (กัน init ซ้ำ)
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
 
-    // ===== signature =====
-    let signatureData = "";
+const db = firebase.firestore();
 
-    async function simpleHash(text) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(text);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+// ===== Firestore Data SDK (คงหน้าตาเดิม เพื่อไม่ให้ส่วนอื่นพัง) =====
+async function initDataSDK() {
+  const col = db.collection("records");
+
+  function mapDocsToRecords(snapshot) {
+    return snapshot.docs.map(d => ({
+      __backendId: d.id,     // ใช้ docId แทน __backendId เดิม
+      ...d.data()
+    }));
+  }
+
+  window.dataSdk = {
+    _unsub: null,
+
+    async init(handler) {
+      try {
+        // โหลดครั้งแรก
+        const snap = await col.get();
+        allRecords = mapDocsToRecords(snap);
+        handler?.onDataChanged?.(allRecords);
+
+        // realtime (อยากให้เหมือนเดิมแบบ data เปลี่ยนแล้ว UI เห็นทันที)
+        this._unsub?.();
+        this._unsub = col.onSnapshot((qSnap) => {
+          allRecords = mapDocsToRecords(qSnap);
+          handler?.onDataChanged?.(allRecords);
+        });
+
+        return { isOk: true };
+      } catch (err) {
+        console.error("Firestore init error:", err);
+        return { isOk: false };
+      }
+    },
+
+    async create(record) {
+      try {
+        // ห้ามส่ง __backendId เข้าไปเก็บ (Firestore มีข้อจำกัดชื่อ field แบบ __...__)
+        const data = { ...record };
+        delete data.__backendId;
+
+        // เพิ่มเอกสารใหม่
+        const docRef = await col.add(data);
+
+        // อัปเดต local cache ให้เร็ว
+        allRecords = [{ __backendId: docRef.id, ...data }, ...allRecords];
+
+        return { isOk: true };
+      } catch (err) {
+        console.error("Firestore create error:", err);
+        return { isOk: false };
+      }
+    },
+
+    async update(record) {
+      try {
+        if (!record.__backendId) return { isOk: false };
+
+        const id = record.__backendId;
+        const data = { ...record };
+        delete data.__backendId;
+
+        // merge = อัปเดตเฉพาะ field ที่ส่งมา (ลดโอกาสพัง)
+        await col.doc(id).set(data, { merge: true });
+
+        return { isOk: true };
+      } catch (err) {
+        console.error("Firestore update error:", err);
+        return { isOk: false };
+      }
     }
+  };
 
-    async function initDataSDK() {
-  // 1) helper: list
-  async function apiList() {
-    const res = await fetch(
-      `${API_URL}?action=list&key=${encodeURIComponent(API_KEY)}`,
-      { method: "GET", cache: "no-store" }
-    );
-    return res.json();
-  }
+  const dataHandler = { onDataChanged(data) { allRecords = data; } };
+  const result = await window.dataSdk.init(dataHandler);
 
-  // 2) helper: post (หลบ CORS preflight ด้วย text/plain)
-  async function apiPost(action, record) {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ key: API_KEY, action, record }),
-      cache: "no-store"
-    });
-    return res.json();
-  }
+  if (!result.isOk) console.error("Failed to initialize Firestore data SDK");
+  return result.isOk;
+}
+
 
   // 3) SDK interface
   window.dataSdk = {
@@ -1668,9 +1733,10 @@
     }
 
     async function init() {
-      if (!API_URL.includes("script.google.com")) {
-        console.warn("API_URL ยังไม่ถูกตั้งค่า");
-      }
+      const apiUrl = String(window.API_URL || "");
+if (!apiUrl || !apiUrl.includes("script.google.com")) {
+  console.warn("API_URL ยังไม่ถูกตั้งค่า (หรือไม่ใช่ Apps Script URL)");
+}
 
       await initDataSDK();
 
