@@ -407,7 +407,7 @@
 
     // ===== Firestore Data SDK (คงหน้าตาเดิม เพื่อไม่ให้ส่วนอื่นพัง) =====
     async function initDataSDK() {
-      const col = db.collection(records);
+      const col = db.collection(RECORDS_COLLECTION);
 
       function mapDocs(snapshot) {
         return snapshot.docs.map(d => ({
