@@ -382,6 +382,10 @@
     // ✅ เพิ่ม: ปลดล็อกการให้คะแนน (ต่อ 1 booking)
     let scoreUnlockForBookingId = null;
 
+    // ✅ NEW: Self-Assessment state (เพิ่มโดยไม่กระทบส่วนอื่น)
+    let selectedAssessmentChapter = null;
+    let selectedAssessmentSubtopic = null;
+
     const ADMIN_CODE = 'ChayanonOrorum!!!';
 
     // ===============================
@@ -514,6 +518,82 @@
     function getUserRecords() {
       if (!currentUser) return [];
       return allRecords.filter(r => r.record_type === 'booking' && r.user_id === currentUser.user_id);
+    }
+
+    // ✅ NEW: Self-Assessment helpers (เพิ่มโดยไม่กระทบระบบเดิม)
+    function getUserAssessments() {
+      if (!currentUser) return [];
+      return allRecords.filter(r => r.record_type === 'self_assessment' && r.user_id === currentUser.user_id);
+    }
+
+    function calculateAssessmentSummary(assessments) {
+      if (!assessments || assessments.length === 0) {
+        return { count: 0, avgUnderstanding: 0, avgConfidence: 0, avgReadiness: 0, totalMinutes: 0 };
+      }
+
+      const sum = assessments.reduce((acc, a) => {
+        acc.understanding += Number(a.understanding || 0);
+        acc.confidence += Number(a.confidence || 0);
+        acc.readiness += Number(a.readiness || 0);
+        acc.minutes += Number(a.study_minutes || 0);
+        return acc;
+      }, { understanding: 0, confidence: 0, readiness: 0, minutes: 0 });
+
+      const n = assessments.length;
+      return {
+        count: n,
+        avgUnderstanding: Math.round((sum.understanding / n) * 10) / 10,
+        avgConfidence: Math.round((sum.confidence / n) * 10) / 10,
+        avgReadiness: Math.round((sum.readiness / n) * 10) / 10,
+        totalMinutes: sum.minutes
+      };
+    }
+
+    function renderAssessmentSummaryCard(assessments) {
+      const s = calculateAssessmentSummary(assessments);
+
+      if (s.count === 0) {
+        return `
+          <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">📝 ประเมินตนเอง</h2>
+            <p class="text-gray-600">ยังไม่มีการประเมินตนเองในระบบ</p>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h2 class="text-2xl font-bold text-gray-800">📝 ประเมินตนเอง</h2>
+              <p class="text-gray-600 mt-1">ทั้งหมด ${s.count} รายการ • รวมเวลาอ่าน ${s.totalMinutes} นาที</p>
+            </div>
+            <div class="text-right">
+              <div class="text-sm text-gray-500">คะแนนเฉลี่ย (เต็ม 5)</div>
+              <div class="text-2xl font-bold text-blue-700">${s.avgReadiness}</div>
+              <div class="text-xs text-gray-500">ความพร้อมสอบ</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+            <div class="bg-blue-50 rounded-lg p-5">
+              <div class="text-sm text-blue-700 font-semibold">ความเข้าใจ</div>
+              <div class="text-3xl font-bold text-blue-900">${s.avgUnderstanding}</div>
+              <div class="text-xs text-blue-700">เฉลี่ยจากทั้งหมด</div>
+            </div>
+            <div class="bg-indigo-50 rounded-lg p-5">
+              <div class="text-sm text-indigo-700 font-semibold">ความมั่นใจ</div>
+              <div class="text-3xl font-bold text-indigo-900">${s.avgConfidence}</div>
+              <div class="text-xs text-indigo-700">เฉลี่ยจากทั้งหมด</div>
+            </div>
+            <div class="bg-green-50 rounded-lg p-5">
+              <div class="text-sm text-green-700 font-semibold">ความพร้อมสอบ</div>
+              <div class="text-3xl font-bold text-green-900">${s.avgReadiness}</div>
+              <div class="text-xs text-green-700">เฉลี่ยจากทั้งหมด</div>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     function calculateUserProgress(userBookings) {
@@ -1284,9 +1364,15 @@
                 </div>
               </div>
 
-              <button id="new-exam-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg">
-                ➕ จองสอบใหม่
-              </button>
+              <!-- ✅ ปรับเป็น 2 ปุ่ม (คงปุ่มเดิม + เพิ่มประเมินตนเอง) -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button id="new-exam-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg">
+                  ➕ จองสอบใหม่
+                </button>
+                <button id="self-assessment-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-lg">
+                  📝 ประเมินตนเอง
+                </button>
+              </div>
             </div>
 
             ${renderProgressStats(progressData)}
@@ -1355,6 +1441,9 @@
       });
 
       document.getElementById('new-exam-btn').addEventListener('click', renderChapterSelection);
+
+      // ✅ NEW: เข้าระบบประเมินตนเอง
+      document.getElementById('self-assessment-btn').addEventListener('click', renderSelfAssessmentHome);
 
       setupAdminButton();
 
@@ -1774,6 +1863,326 @@
           scoreUnlockForBookingId = null; // ✅ บันทึกแล้วล็อกใหม่
           showMessage(messageContainer, '✓ บันทึกผลสอบสำเร็จ!', 'success');
           setTimeout(() => renderDashboard(), 1500);
+        } else {
+          showMessage(messageContainer, 'เกิดข้อผิดพลาด', 'error');
+        }
+      });
+    }
+
+    // ===============================
+    // ✅ SELF ASSESSMENT (NEW) - เพิ่มโดยไม่แตะระบบเดิม
+    // ===============================
+    function renderSelfAssessmentHome() {
+      currentView = 'self_assessment_home';
+
+      const assessments = getUserAssessments().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full p-4 md:p-8 fade-in">
+          <div class="max-w-6xl mx-auto">
+            <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
+              <button id="back-to-dashboard" class="text-blue-600 hover:text-blue-700 font-semibold mb-4 flex items-center space-x-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                </svg>
+                <span>กลับ Dashboard</span>
+              </button>
+
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h1 class="text-3xl font-bold text-gray-800">📝 ประเมินตนเอง</h1>
+                  <p class="text-gray-600 mt-1">บันทึกความเข้าใจ/ความมั่นใจ/ความพร้อมสอบของตัวเอง เพื่อเห็นพัฒนาการ</p>
+                </div>
+                <button id="new-assessment-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg">
+                  ➕ ทำแบบประเมินใหม่
+                </button>
+              </div>
+            </div>
+
+            ${renderAssessmentSummaryCard(assessments)}
+
+            <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+              <h2 class="text-2xl font-bold text-gray-800 mb-4">รายการประเมินล่าสุด</h2>
+
+              ${assessments.length === 0 ? `
+                <div class="text-center py-12">
+                  <p class="text-gray-500 text-lg">ยังไม่มีรายการประเมิน</p>
+                </div>
+              ` : `
+                <div class="space-y-4">
+                  ${assessments.slice(0, 30).map(a => `
+                    <div class="border border-gray-200 rounded-lg p-5">
+                      <div class="flex items-start justify-between gap-4">
+                        <div class="flex-1">
+                          <div class="font-bold text-gray-800">${a.chapter_title || 'ไม่ระบุบท'}</div>
+                          <div class="text-gray-600 text-sm mt-1">📖 ${a.subtopic_title || 'ไม่ระบุหัวข้อ'}</div>
+                          <div class="text-xs text-gray-500 mt-2">🕒 ${new Date(a.created_at).toLocaleString('th-TH')}</div>
+                          ${a.note ? `<div class="text-sm text-gray-700 mt-2 truncate">🗒️ ${String(a.note)}</div>` : ''}
+                        </div>
+
+                        <div class="text-right min-w-[160px]">
+                          <div class="text-xs text-gray-500">เต็ม 5</div>
+                          <div class="text-sm font-semibold text-blue-700">เข้าใจ: ${Number(a.understanding || 0)}</div>
+                          <div class="text-sm font-semibold text-indigo-700">มั่นใจ: ${Number(a.confidence || 0)}</div>
+                          <div class="text-sm font-semibold text-green-700">พร้อม: ${Number(a.readiness || 0)}</div>
+                          <div class="text-xs text-gray-500 mt-1">⏱️ ${Number(a.study_minutes || 0)} นาที</div>
+                        </div>
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+        ${renderAdminButton()}
+      `;
+
+      document.getElementById('back-to-dashboard').addEventListener('click', renderDashboard);
+      document.getElementById('new-assessment-btn').addEventListener('click', renderAssessmentChapterSelection);
+
+      setupAdminButton();
+    }
+
+    function renderAssessmentChapterSelection() {
+      currentView = 'self_assessment_chapters';
+      selectedAssessmentChapter = null;
+      selectedAssessmentSubtopic = null;
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full p-4 md:p-8 fade-in">
+          <div class="max-w-7xl mx-auto">
+            <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
+              <button id="back-assessment-home" class="text-blue-600 hover:text-blue-700 font-semibold mb-4 flex items-center space-x-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                </svg>
+                <span>กลับ</span>
+              </button>
+
+              <h2 class="text-3xl font-bold text-gray-800">เลือกบทเพื่อประเมินตนเอง</h2>
+              <p class="text-gray-600 mt-1">เลือกบทและหัวข้อย่อยที่คุณต้องการประเมิน</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ${CHAPTERS.map(ch => `
+                <div class="bg-white rounded-xl shadow-lg p-6 card-hover">
+                  <div class="flex items-center mb-4">
+                    <div class="w-16 h-16 bg-indigo-600 rounded-lg flex items-center justify-center mr-4">
+                      <span class="text-2xl font-bold text-white">${ch.number}</span>
+                    </div>
+                  </div>
+                  <h3 class="text-lg font-bold text-gray-800 mb-2">${ch.name}</h3>
+                  <p class="text-sm text-gray-600 mb-4">${ch.description}</p>
+                  <button class="assessment-chapter-btn w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg" data-chapter-id="${ch.id}">
+                    เลือกบทนี้
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        ${renderAdminButton()}
+      `;
+
+      document.getElementById('back-assessment-home').addEventListener('click', renderSelfAssessmentHome);
+
+      document.querySelectorAll('.assessment-chapter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const id = e.target.dataset.chapterId;
+          selectedAssessmentChapter = CHAPTERS.find(c => c.id === id);
+          renderAssessmentSubtopicSelection();
+        });
+      });
+
+      setupAdminButton();
+    }
+
+    function renderAssessmentSubtopicSelection() {
+      currentView = 'self_assessment_subtopics';
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full p-4 md:p-8 fade-in">
+          <div class="max-w-5xl mx-auto">
+            <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
+              <button id="back-assessment-chapters" class="text-blue-600 hover:text-blue-700 font-semibold mb-4 flex items-center space-x-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                </svg>
+                <span>กลับไปเลือกบท</span>
+              </button>
+
+              <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl p-6 text-white mb-6">
+                <h2 class="text-2xl font-bold">บทที่ ${selectedAssessmentChapter.number}: ${selectedAssessmentChapter.name}</h2>
+                <p class="text-indigo-100 text-sm mt-1">${selectedAssessmentChapter.description}</p>
+              </div>
+
+              <h3 class="text-xl font-bold text-gray-800">เลือกหัวข้อย่อย (${selectedAssessmentChapter.subtopics.length} หัวข้อ)</h3>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+              ${selectedAssessmentChapter.subtopics.map((s, index) => `
+                <div class="bg-white rounded-xl shadow-lg p-6 card-hover">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center flex-1">
+                      <div class="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center mr-4">
+                        <span class="text-lg font-bold text-indigo-600">${selectedAssessmentChapter.number}.${index + 1}</span>
+                      </div>
+                      <h4 class="text-lg font-bold text-gray-800">${s.name}</h4>
+                    </div>
+                    <button class="assessment-subtopic-btn bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg" data-subtopic-id="${s.id}">
+                      เลือกหัวข้อนี้
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        ${renderAdminButton()}
+      `;
+
+      document.getElementById('back-assessment-chapters').addEventListener('click', renderAssessmentChapterSelection);
+
+      document.querySelectorAll('.assessment-subtopic-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const sid = e.target.dataset.subtopicId;
+          selectedAssessmentSubtopic = selectedAssessmentChapter.subtopics.find(x => x.id === sid);
+          renderAssessmentForm();
+        });
+      });
+
+      setupAdminButton();
+    }
+
+    function renderAssessmentForm() {
+      currentView = 'self_assessment_form';
+
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full p-4 md:p-8 fade-in">
+          <div class="max-w-3xl mx-auto">
+            <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8">
+              <button id="back-assessment-subtopics" class="text-blue-600 hover:text-blue-700 font-semibold mb-4 flex items-center space-x-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                </svg>
+                <span>กลับ</span>
+              </button>
+
+              <h2 class="text-3xl font-bold text-gray-800 mb-6">ทำแบบประเมินตนเอง</h2>
+
+              <div class="bg-indigo-50 rounded-lg p-6 mb-6">
+                <h3 class="font-semibold text-indigo-900 mb-2">หัวข้อที่เลือก</h3>
+                <p class="text-indigo-800">${selectedAssessmentChapter.name} - ${selectedAssessmentSubtopic.name}</p>
+              </div>
+
+              <div id="message-container"></div>
+
+              <form id="assessment-form" class="space-y-6">
+                <div class="bg-gray-50 rounded-xl p-5 border border-gray-200">
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="block text-gray-700 font-semibold">ความเข้าใจเนื้อหา</label>
+                    <span id="understanding-val" class="font-bold text-blue-700">3</span>
+                  </div>
+                  <input id="understanding" type="range" min="1" max="5" value="3" class="w-full">
+                  <div class="flex justify-between text-xs text-gray-500 mt-1"><span>1</span><span>5</span></div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl p-5 border border-gray-200">
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="block text-gray-700 font-semibold">ความมั่นใจตอบปากเปล่า</label>
+                    <span id="confidence-val" class="font-bold text-indigo-700">3</span>
+                  </div>
+                  <input id="confidence" type="range" min="1" max="5" value="3" class="w-full">
+                  <div class="flex justify-between text-xs text-gray-500 mt-1"><span>1</span><span>5</span></div>
+                </div>
+
+                <div class="bg-gray-50 rounded-xl p-5 border border-gray-200">
+                  <div class="flex items-center justify-between mb-2">
+                    <label class="block text-gray-700 font-semibold">ความพร้อมสอบ</label>
+                    <span id="readiness-val" class="font-bold text-green-700">3</span>
+                  </div>
+                  <input id="readiness" type="range" min="1" max="5" value="3" class="w-full">
+                  <div class="flex justify-between text-xs text-gray-500 mt-1"><span>1</span><span>5</span></div>
+                </div>
+
+                <div>
+                  <label for="study-minutes" class="block text-gray-700 font-semibold mb-2">เวลาอ่าน/ทบทวนหัวข้อนี้ (นาที)</label>
+                  <input type="number" id="study-minutes" min="0" value="0"
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                </div>
+
+                <div>
+                  <label for="assessment-note" class="block text-gray-700 font-semibold mb-2">บันทึก/สิ่งที่ต้องทบทวนเพิ่มเติม</label>
+                  <textarea id="assessment-note" rows="4"
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                    placeholder="เช่น ยังสับสนเรื่อง... ต้องทวนศัพท์..."></textarea>
+                </div>
+
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-lg">
+                  💾 บันทึกการประเมิน
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+        ${renderAdminButton()}
+      `;
+
+      document.getElementById('back-assessment-subtopics').addEventListener('click', renderAssessmentSubtopicSelection);
+      setupAdminButton();
+
+      const syncRangeLabel = (id, labelId) => {
+        const el = document.getElementById(id);
+        const lab = document.getElementById(labelId);
+        const update = () => { if (lab) lab.textContent = el.value; };
+        el.addEventListener('input', update);
+        update();
+      };
+
+      syncRangeLabel('understanding', 'understanding-val');
+      syncRangeLabel('confidence', 'confidence-val');
+      syncRangeLabel('readiness', 'readiness-val');
+
+      document.getElementById('assessment-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const messageContainer = document.getElementById('message-container');
+
+        if (allRecords.length >= 999) {
+          showMessage(messageContainer, 'ระบบเต็ม', 'error');
+          return;
+        }
+
+        const record = {
+          record_type: 'self_assessment',
+          assessment_id: generateId('assessment'),
+          user_id: currentUser.user_id,
+
+          chapter_id: selectedAssessmentChapter.id,
+          chapter_title: `บทที่ ${selectedAssessmentChapter.number}: ${selectedAssessmentChapter.name}`,
+          subtopic_id: selectedAssessmentSubtopic.id,
+          subtopic_title: selectedAssessmentSubtopic.name,
+
+          understanding: Number(document.getElementById('understanding').value),
+          confidence: Number(document.getElementById('confidence').value),
+          readiness: Number(document.getElementById('readiness').value),
+          study_minutes: Number(document.getElementById('study-minutes').value || 0),
+          note: document.getElementById('assessment-note').value || '',
+
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        const result = await window.dataSdk.create(record);
+
+        if (result.isOk) {
+          showMessage(messageContainer, '✓ บันทึกการประเมินสำเร็จ!', 'success');
+          setTimeout(() => renderSelfAssessmentHome(), 900);
         } else {
           showMessage(messageContainer, 'เกิดข้อผิดพลาด', 'error');
         }
