@@ -386,6 +386,10 @@
     let selectedAssessmentChapter = null;
     let selectedAssessmentSubtopic = null;
 
+    // ✅ NEW: Self-Assessment cache + SDK (เห็นเฉพาะเจ้าของ user_id เท่านั้น)
+    let userAssessmentRecords = [];
+    let assessmentLoaded = false;
+
     const ADMIN_CODE = 'ChayanonOrorum!!!';
 
     // ===============================
@@ -408,9 +412,83 @@
     }
     const db = firebase.firestore();
 
+    // ✅ NEW: Assessment SDK (subscribe เฉพาะ self_assessment ของ currentUser.user_id)
+    const assessmentSdk = {
+      _unsub: null,
+      _ready: false,
+      _userId: null,
+
+      async init(handler) {
+        try {
+          if (!currentUser?.user_id) return { isOk: false };
+
+          // ถ้า subscribe อยู่แล้วและเป็น user เดิม ไม่ต้องทำซ้ำ
+          if (this._ready && this._userId === currentUser.user_id) return { isOk: true };
+
+          // เปลี่ยน user / รี-init
+          this._unsub?.();
+          this._unsub = null;
+          this._ready = false;
+          this._userId = currentUser.user_id;
+          assessmentLoaded = false;
+          userAssessmentRecords = [];
+
+          const q = db.collection(RECORDS_COLLECTION)
+            .where('record_type', '==', 'self_assessment')
+            .where('user_id', '==', currentUser.user_id);
+
+          const firstLoad = new Promise((resolve) => {
+            let done = false;
+
+            this._unsub = q.onSnapshot(
+              (snap) => {
+                userAssessmentRecords = snap.docs.map(d => ({
+                  __backendId: d.id,
+                  ...d.data()
+                }));
+
+                // กันข้อมูลหลุด: เผื่อมี record แปลกๆ ก็กรองซ้ำ
+                userAssessmentRecords = userAssessmentRecords.filter(a => a.user_id === currentUser.user_id);
+
+                assessmentLoaded = true;
+                handler?.onDataChanged?.(userAssessmentRecords);
+
+                if (!done) { done = true; resolve({ isOk: true }); }
+              },
+              (err) => {
+                console.error("Assessment onSnapshot error:", err);
+                assessmentLoaded = true;
+                if (!done) { done = true; resolve({ isOk: false }); }
+              }
+            );
+          });
+
+          const res = await firstLoad;
+          this._ready = res.isOk;
+          return res;
+        } catch (err) {
+          console.error("Assessment init error:", err);
+          assessmentLoaded = true;
+          return { isOk: false };
+        }
+      },
+
+      stop() {
+        try { this._unsub?.(); } catch (_) {}
+        this._unsub = null;
+        this._ready = false;
+        this._userId = null;
+        userAssessmentRecords = [];
+        assessmentLoaded = false;
+      }
+    };
+
     // ===== Firestore Data SDK (คงหน้าตาเดิม เพื่อไม่ให้ส่วนอื่นพัง) =====
     async function initDataSDK() {
-      const col = db.collection(RECORDS_COLLECTION);
+      const baseCol = db.collection(RECORDS_COLLECTION);
+
+      // ✅ สำคัญ: ดึงเข้า allRecords แค่ user + booking เท่านั้น (ไม่เอา self_assessment)
+      const liveCol = baseCol.where('record_type', 'in', ['user', 'booking']);
 
       function mapDocs(snapshot) {
         return snapshot.docs.map(d => ({
@@ -429,7 +507,7 @@
               let done = false;
 
               this._unsub?.();
-              this._unsub = col.onSnapshot(
+              this._unsub = liveCol.onSnapshot(
                 (qSnap) => {
                   allRecords = mapDocs(qSnap);
                   handler?.onDataChanged?.(allRecords);
@@ -460,7 +538,7 @@
           try {
             const data = { ...record };
             delete data.__backendId;
-            await col.add(data);
+            await baseCol.add(data);
             return { isOk: true };
           } catch (err) {
             console.error("Firestore create error:", err);
@@ -476,7 +554,7 @@
             const data = { ...record };
             delete data.__backendId;
 
-            await col.doc(id).set(data, { merge: true });
+            await baseCol.doc(id).set(data, { merge: true });
             return { isOk: true };
           } catch (err) {
             console.error("Firestore update error:", err);
@@ -487,7 +565,7 @@
         async delete(id) {
           try {
             if (!id) return { isOk: false };
-            await col.doc(id).delete();
+            await baseCol.doc(id).delete();
             return { isOk: true };
           } catch (err) {
             console.error("Firestore delete error:", err);
@@ -520,10 +598,10 @@
       return allRecords.filter(r => r.record_type === 'booking' && r.user_id === currentUser.user_id);
     }
 
-    // ✅ NEW: Self-Assessment helpers (เพิ่มโดยไม่กระทบระบบเดิม)
+    // ✅ NEW: Self-Assessment helpers (เห็นเฉพาะเจ้าของ user_id)
     function getUserAssessments() {
-      if (!currentUser) return [];
-      return allRecords.filter(r => r.record_type === 'self_assessment' && r.user_id === currentUser.user_id);
+      if (!currentUser?.user_id) return [];
+      return (userAssessmentRecords || []).filter(a => a.user_id === currentUser.user_id);
     }
 
     function calculateAssessmentSummary(assessments) {
@@ -1437,6 +1515,7 @@
 
       document.getElementById('logout-btn').addEventListener('click', () => {
         currentUser = null;
+        assessmentSdk.stop(); // ✅ เคลียร์ self-assessment เฉพาะ user
         renderLanding();
       });
 
@@ -1870,10 +1949,19 @@
     }
 
     // ===============================
-    // ✅ SELF ASSESSMENT (NEW) - เพิ่มโดยไม่แตะระบบเดิม
+    // ✅ SELF ASSESSMENT (NEW) - เห็นเฉพาะเจ้าของ user_id
     // ===============================
     function renderSelfAssessmentHome() {
       currentView = 'self_assessment_home';
+
+      // ✅ เริ่ม subscribe self_assessment เฉพาะของเจ้าของ user_id
+      if (currentUser?.user_id) {
+        assessmentSdk.init({
+          onDataChanged() {
+            if (currentView === 'self_assessment_home') renderSelfAssessmentHome();
+          }
+        });
+      }
 
       const assessments = getUserAssessments().sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -1900,7 +1988,12 @@
               </div>
             </div>
 
-            ${renderAssessmentSummaryCard(assessments)}
+            ${!assessmentLoaded ? `
+              <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">📝 ประเมินตนเอง</h2>
+                <p class="text-gray-600">กำลังโหลดข้อมูล...</p>
+              </div>
+            ` : renderAssessmentSummaryCard(assessments)}
 
             <div class="bg-white rounded-2xl shadow-xl p-6 md:p-8">
               <h2 class="text-2xl font-bold text-gray-800 mb-4">รายการประเมินล่าสุด</h2>
