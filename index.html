@@ -379,21 +379,21 @@
     let allRecords = [];
     let isAdminMode = false;
 
-    // ✅ เพิ่ม: ปลดล็อกการให้คะแนน (ต่อ 1 booking)
+    // ✅ ปลดล็อกการให้คะแนน (ต่อ 1 booking)
     let scoreUnlockForBookingId = null;
 
-    // ✅ NEW: Self-Assessment state (เพิ่มโดยไม่กระทบส่วนอื่น)
+    // ✅ Self-Assessment state
     let selectedAssessmentChapter = null;
     let selectedAssessmentSubtopic = null;
 
-    // ✅ NEW: Self-Assessment cache + SDK (เห็นเฉพาะเจ้าของ user_id เท่านั้น)
+    // ✅ Self-Assessment cache + SDK
     let userAssessmentRecords = [];
     let assessmentLoaded = false;
 
     const ADMIN_CODE = 'ChayanonOrorum!!!';
 
     // ===============================
-    // FIREBASE (Firestore only)
+    // FIREBASE (Firestore + Auth)
     // ===============================
     const firebaseConfig = {
       apiKey: "AIzaSyBYdF1hUl5m5h2BROtiyWpsKu7Y2ZBAeLQ",
@@ -411,8 +411,11 @@
       firebase.initializeApp(firebaseConfig);
     }
     const db = firebase.firestore();
+    const auth = firebase.auth();
 
-    // ✅ NEW: Assessment SDK (subscribe เฉพาะ self_assessment ของ currentUser.user_id)
+    // ===============================
+    // ✅ Assessment SDK (subscribe เฉพาะ self_assessment ของ currentUser.user_id)
+    // ===============================
     const assessmentSdk = {
       _unsub: null,
       _ready: false,
@@ -422,10 +425,8 @@
         try {
           if (!currentUser?.user_id) return { isOk: false };
 
-          // ถ้า subscribe อยู่แล้วและเป็น user เดิม ไม่ต้องทำซ้ำ
           if (this._ready && this._userId === currentUser.user_id) return { isOk: true };
 
-          // เปลี่ยน user / รี-init
           this._unsub?.();
           this._unsub = null;
           this._ready = false;
@@ -447,7 +448,6 @@
                   ...d.data()
                 }));
 
-                // กันข้อมูลหลุด: เผื่อมี record แปลกๆ ก็กรองซ้ำ
                 userAssessmentRecords = userAssessmentRecords.filter(a => a.user_id === currentUser.user_id);
 
                 assessmentLoaded = true;
@@ -483,18 +483,23 @@
       }
     };
 
-    // ===== Firestore Data SDK (คงหน้าตาเดิม เพื่อไม่ให้ส่วนอื่นพัง) =====
+    // ===============================
+    // ✅ Firestore Data SDK (อ่าน/เขียนแยก user ตาม Auth + Rules)
+    // ===============================
     async function initDataSDK() {
       const baseCol = db.collection(RECORDS_COLLECTION);
 
-      // ✅ สำคัญ: ดึงเข้า allRecords แค่ user + booking เท่านั้น (ไม่เอา self_assessment)
-      const liveCol = baseCol.where('record_type', 'in', ['user', 'booking']);
-
       function mapDocs(snapshot) {
-        return snapshot.docs.map(d => ({
-          __backendId: d.id,
-          ...d.data()
-        }));
+        return snapshot.docs.map(d => ({ __backendId: d.id, ...d.data() }));
+      }
+
+      async function checkIsAdmin(uid) {
+        try {
+          const s = await db.collection('admins').doc(uid).get();
+          return s.exists && (s.data()?.active !== false);
+        } catch (_) {
+          return false;
+        }
       }
 
       window.dataSdk = {
@@ -503,31 +508,101 @@
 
         async init(handler) {
           try {
+            const u = auth.currentUser;
+            if (!u?.uid) return { isOk: false };
+
+            const uid = u.uid;
+            const admin = await checkIsAdmin(uid);
+
+            try { this._unsub?.(); } catch (_) {}
+            this._unsub = null;
+            this._ready = false;
+
+            if (admin) {
+              const liveCol = baseCol.where('record_type', 'in', ['user', 'booking']);
+              const firstLoad = new Promise((resolve) => {
+                let done = false;
+                this._unsub = liveCol.onSnapshot(
+                  (qSnap) => {
+                    allRecords = mapDocs(qSnap);
+                    handler?.onDataChanged?.(allRecords);
+                    if (!done) { done = true; resolve({ isOk: true }); }
+                  },
+                  (err) => {
+                    console.error("Firestore admin onSnapshot error:", err);
+                    if (!done) { done = true; resolve({ isOk: false }); }
+                  }
+                );
+              });
+
+              const res = await firstLoad;
+              this._ready = res.isOk;
+              return res;
+            }
+
+            // NORMAL USER: อ่านโปรไฟล์ doc(uid) + bookings ของตัวเอง
+            let userRec = null;
+            let bookings = [];
+            let gotUser = false;
+            let gotBookings = false;
+
+            const emit = () => {
+              const combined = [];
+              if (userRec) combined.push(userRec);
+              combined.push(...bookings);
+              allRecords = combined;
+              handler?.onDataChanged?.(allRecords);
+            };
+
             const firstLoad = new Promise((resolve) => {
               let done = false;
+              const tryDone = (ok) => {
+                if (!done && gotUser && gotBookings) {
+                  done = true;
+                  resolve({ isOk: ok });
+                }
+              };
 
-              this._unsub?.();
-              this._unsub = liveCol.onSnapshot(
-                (qSnap) => {
-                  allRecords = mapDocs(qSnap);
-                  handler?.onDataChanged?.(allRecords);
-
-                  if (!done) {
-                    done = true;
-                    resolve({ isOk: true });
-                  }
+              const unsubUser = baseCol.doc(uid).onSnapshot(
+                (doc) => {
+                  gotUser = true;
+                  userRec = doc.exists ? ({ __backendId: doc.id, ...doc.data() }) : null;
+                  if (userRec) currentUser = userRec;
+                  emit();
+                  tryDone(true);
                 },
                 (err) => {
-                  console.error("Firestore onSnapshot error:", err);
-                  if (!done) {
-                    done = true;
-                    resolve({ isOk: false });
-                  }
+                  console.error("User doc onSnapshot error:", err);
+                  gotUser = true;
+                  emit();
+                  tryDone(false);
                 }
               );
+
+              const qBookings = baseCol.where('record_type', '==', 'booking').where('user_id', '==', uid);
+              const unsubBookings = qBookings.onSnapshot(
+                (snap) => {
+                  gotBookings = true;
+                  bookings = mapDocs(snap);
+                  emit();
+                  tryDone(true);
+                },
+                (err) => {
+                  console.error("Bookings onSnapshot error:", err);
+                  gotBookings = true;
+                  bookings = [];
+                  emit();
+                  tryDone(false);
+                }
+              );
+
+              this._unsub = () => { try { unsubUser(); } catch (_) {} try { unsubBookings(); } catch (_) {} };
             });
 
-            return await firstLoad;
+            const res = await firstLoad;
+            this._ready = res.isOk;
+            return res;
+
           } catch (err) {
             console.error("Firestore init error:", err);
             return { isOk: false };
@@ -587,18 +662,11 @@
       return prefix + '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
 
-    async function simpleHash(text) {
-      const enc = new TextEncoder();
-      const buf = await crypto.subtle.digest('SHA-256', enc.encode(String(text)));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
     function getUserRecords() {
       if (!currentUser) return [];
       return allRecords.filter(r => r.record_type === 'booking' && r.user_id === currentUser.user_id);
     }
 
-    // ✅ NEW: Self-Assessment helpers (เห็นเฉพาะเจ้าของ user_id)
     function getUserAssessments() {
       if (!currentUser?.user_id) return [];
       return (userAssessmentRecords || []).filter(a => a.user_id === currentUser.user_id);
@@ -682,14 +750,7 @@
 
       const percentage = totalExams > 0 ? Math.round((passedExams / totalExams) * 100) : 0;
 
-      return {
-        percentage,
-        passedExams,
-        failedExams,
-        retestExams,
-        totalExams,
-        userBookings
-      };
+      return { percentage, passedExams, failedExams, retestExams, totalExams, userBookings };
     }
 
     function renderProgressBar(percentage, size = 'large') {
@@ -1142,7 +1203,6 @@
           return;
         }
 
-        // ✅ ต้องใส่รหัส Admin ทุกครั้งก่อนบันทึกคะแนน/ผลสอบ
         const ok = await promptAdminCode({
           title: "ยืนยันก่อนบันทึกการแก้ไข",
           description: "ต้องใส่รหัสผู้ดูแลก่อนบันทึกคะแนน/ผลสอบ"
@@ -1165,7 +1225,7 @@
           ...baseRecord,
           oral_result: examResult,
           score: parseInt(examScore, 10),
-          signed: '', // ✅ ลายเซ็นถูกลบออกเสมอ
+          signed: '',
           updated_at: new Date().toISOString(),
           admin_last_edit_at: new Date().toISOString(),
           admin_last_edit_by: 'ADMIN_PANEL'
@@ -1221,7 +1281,7 @@
     }
 
     // ===============================
-    // REGISTER
+    // REGISTER (Firebase Auth)
     // ===============================
     function renderRegister() {
       currentView = 'register';
@@ -1294,35 +1354,31 @@
           return;
         }
 
-        const existingUser = allRecords.find(r => r.record_type === 'user' && r.email === email);
-        if (existingUser) {
-          showMessage(messageContainer, 'อีเมลนี้ถูกใช้งานแล้ว', 'error');
-          return;
-        }
+        try {
+          const cred = await auth.createUserWithEmailAndPassword(email, password);
+          const uid = cred.user.uid;
 
-        if (allRecords.length >= 999) {
-          showMessage(messageContainer, 'ระบบเต็ม', 'error');
-          return;
-        }
+          const profile = {
+            record_type: 'user',
+            user_id: uid,
+            name,
+            email,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
 
-        const passwordHash = await simpleHash(password);
+          await db.collection(RECORDS_COLLECTION).doc(uid).set(profile, { merge: true });
 
-        const newUser = {
-          record_type: 'user',
-          user_id: generateId('user'),
-          name: name,
-          email: email,
-          password_hash: passwordHash,
-          created_at: new Date().toISOString()
-        };
-
-        const result = await window.dataSdk.create(newUser);
-
-        if (result.isOk) {
           showMessage(messageContainer, 'สมัครสมาชิกสำเร็จ!', 'success');
-          setTimeout(() => renderLogin(), 1500);
-        } else {
-          showMessage(messageContainer, 'เกิดข้อผิดพลาด', 'error');
+        } catch (err) {
+          console.error(err);
+          if (err.code === 'auth/email-already-in-use') {
+            showMessage(messageContainer, 'อีเมลนี้ถูกใช้งานแล้ว', 'error');
+          } else if (err.code === 'auth/weak-password') {
+            showMessage(messageContainer, 'รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร', 'error');
+          } else {
+            showMessage(messageContainer, 'เกิดข้อผิดพลาดในการสมัครสมาชิก', 'error');
+          }
         }
       });
     }
@@ -1381,21 +1437,13 @@
 
         const email = document.getElementById('login-email').value.trim().toLowerCase();
         const password = document.getElementById('login-password').value;
-
         const messageContainer = document.getElementById('message-container');
-        const passwordHash = await simpleHash(password);
 
-        const user = allRecords.find(r =>
-          r.record_type === 'user' &&
-          r.email === email &&
-          r.password_hash === passwordHash
-        );
-
-        if (user) {
-          currentUser = user;
+        try {
+          await auth.signInWithEmailAndPassword(email, password);
           showMessage(messageContainer, 'เข้าสู่ระบบสำเร็จ!', 'success');
-          setTimeout(() => renderDashboard(), 1000);
-        } else {
+        } catch (err) {
+          console.error(err);
           showMessage(messageContainer, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง', 'error');
         }
       });
@@ -1442,7 +1490,6 @@
                 </div>
               </div>
 
-              <!-- ✅ ปรับเป็น 2 ปุ่ม (คงปุ่มเดิม + เพิ่มประเมินตนเอง) -->
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <button id="new-exam-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg">
                   ➕ จองสอบใหม่
@@ -1513,15 +1560,11 @@
         ${renderAdminButton()}
       `;
 
-      document.getElementById('logout-btn').addEventListener('click', () => {
-        currentUser = null;
-        assessmentSdk.stop(); // ✅ เคลียร์ self-assessment เฉพาะ user
-        renderLanding();
+      document.getElementById('logout-btn').addEventListener('click', async () => {
+        try { await auth.signOut(); } catch (_) {}
       });
 
       document.getElementById('new-exam-btn').addEventListener('click', renderChapterSelection);
-
-      // ✅ NEW: เข้าระบบประเมินตนเอง
       document.getElementById('self-assessment-btn').addEventListener('click', renderSelfAssessmentHome);
 
       setupAdminButton();
@@ -1736,7 +1779,7 @@
           score: null,
           examiner_note: '',
           candidate_answer_summary: '',
-          signed: '', // ✅ ลายเซ็นถูกลบออก (คง field ไว้กันของเก่าพัง)
+          signed: '',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
@@ -1753,7 +1796,7 @@
     }
 
     // ===============================
-    // EXAM DETAIL (✅ ลบลายเซ็น + ล็อกการบันทึกคะแนนด้วยรหัส Admin)
+    // EXAM DETAIL (ล็อกคะแนนด้วยรหัส Admin)
     // ===============================
     function renderExamDetail() {
       const currentRecord = allRecords.find(r => r.__backendId === bookingData.__backendId);
@@ -1789,7 +1832,7 @@
                     <div>
                       <div class="font-semibold">🔒 การให้คะแนนถูกล็อก</div>
                       <div class="text-sm mt-1">ต้องใส่รหัสผู้ดูแลเพื่อปลดล็อกก่อนบันทึก “คะแนน/ผลสอบ”</div>
-                      <div class="text-xs mt-2 text-yellow-700">* สามารถบันทึก “สรุปคำตอบ/หมายเหตุ” ได้โดยไม่ต้องใช้รหัส</div>
+                      <div class="text-xs mt-2 text-yellow-700">* บันทึก “สรุปคำตอบ/หมายเหตุ” ได้โดยไม่ต้องใช้รหัส</div>
                     </div>
                     <button id="unlock-score-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-semibold px-4 py-2 rounded-lg">
                       ปลดล็อก
@@ -1847,7 +1890,7 @@
       `;
 
       document.getElementById('back-to-dashboard').addEventListener('click', () => {
-        scoreUnlockForBookingId = null; // ✅ ออกจากหน้าแล้วล็อกใหม่
+        scoreUnlockForBookingId = null;
         renderDashboard();
       });
 
@@ -1880,13 +1923,12 @@
         const updatedRecordFromSheet = allRecords.find(r => r.__backendId === bookingData.__backendId);
         const baseRecord = updatedRecordFromSheet || bookingData;
 
-        // ✅ ถ้ายังไม่ปลดล็อก: บันทึกได้เฉพาะข้อความ (ไม่แตะคะแนน/ผลสอบ)
         if (scoreUnlockForBookingId !== bookingData.__backendId) {
           const recordToUpdate = {
             ...baseRecord,
             examiner_note: examinerNotes,
             candidate_answer_summary: candidateAnswer,
-            signed: '', // ✅ ลายเซ็นถูกลบออกเสมอ
+            signed: '',
             updated_at: new Date().toISOString()
           };
 
@@ -1902,7 +1944,6 @@
           return;
         }
 
-        // ✅ ปลดล็อกแล้ว: ต้องใส่รหัส Admin ก่อนบันทึกคะแนน/ผลสอบ
         const examResult = document.getElementById('exam-result').value;
         const examScore = document.getElementById('exam-score').value;
 
@@ -1931,7 +1972,7 @@
           score: parseInt(examScore, 10),
           examiner_note: examinerNotes,
           candidate_answer_summary: candidateAnswer,
-          signed: '', // ✅ ลายเซ็นถูกลบออกเสมอ
+          signed: '',
           updated_at: new Date().toISOString()
         };
 
@@ -1939,7 +1980,7 @@
 
         if (result.isOk) {
           bookingData = { ...recordToUpdate };
-          scoreUnlockForBookingId = null; // ✅ บันทึกแล้วล็อกใหม่
+          scoreUnlockForBookingId = null;
           showMessage(messageContainer, '✓ บันทึกผลสอบสำเร็จ!', 'success');
           setTimeout(() => renderDashboard(), 1500);
         } else {
@@ -1949,12 +1990,11 @@
     }
 
     // ===============================
-    // ✅ SELF ASSESSMENT (NEW) - เห็นเฉพาะเจ้าของ user_id
+    // ✅ SELF ASSESSMENT (NEW)
     // ===============================
     function renderSelfAssessmentHome() {
       currentView = 'self_assessment_home';
 
-      // ✅ เริ่ม subscribe self_assessment เฉพาะของเจ้าของ user_id
       if (currentUser?.user_id) {
         assessmentSdk.init({
           onDataChanged() {
@@ -2295,11 +2335,9 @@
     }
 
     // ===============================
-    // INIT
+    // INIT (Auth คุมการเข้าออก + initDataSDK)
     // ===============================
     async function init() {
-      await initDataSDK();
-
       if (window.elementSdk) {
         window.elementSdk.init({
           defaultConfig,
@@ -2317,6 +2355,48 @@
           ])
         });
       }
+
+      auth.onAuthStateChanged(async (user) => {
+        try {
+          allRecords = [];
+          bookingData = null;
+          selectedChapter = null;
+          selectedSubtopic = null;
+          scoreUnlockForBookingId = null;
+          assessmentSdk.stop();
+
+          if (!user) {
+            currentUser = null;
+            renderLanding();
+            return;
+          }
+
+          const profRef = db.collection(RECORDS_COLLECTION).doc(user.uid);
+          const profSnap = await profRef.get();
+
+          if (profSnap.exists) {
+            currentUser = { __backendId: profSnap.id, ...profSnap.data() };
+          } else {
+            const fallback = {
+              record_type: 'user',
+              user_id: user.uid,
+              name: user.email || 'User',
+              email: user.email || '',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            };
+            await profRef.set(fallback, { merge: true });
+            currentUser = { __backendId: user.uid, ...fallback };
+          }
+
+          await initDataSDK();
+          renderDashboard();
+        } catch (err) {
+          console.error("init/onAuthStateChanged error:", err);
+          currentUser = null;
+          renderLanding();
+        }
+      });
 
       renderLanding();
     }
